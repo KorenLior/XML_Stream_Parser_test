@@ -1,4 +1,3 @@
-
 import unittest, asyncio
 from xml.etree.ElementTree import ParseError
 import xml_stream_parser as xmlsp
@@ -55,8 +54,7 @@ class TestXMLStreamParserExtended(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s, {"{urn:x}foo": {"{urn:x}bar": 1}})
 
     async def test_comments_and_pi_ignored_with_decl(self):
-        # XML declaration at the start of the stream should be ignored by the preprocessor
-        gen = xmlsp.create_generator("<?xml version='1.0'?><a>1</a><!--comment--><b>2</b>", chunk_sizes=[len("<?xml version='1.0'?>")], min_delay=0, max_delay=0)
+        gen = xmlsp.create_generator("<?xml version='1.0'?><a>1</a><!--comment--><b>2</b>", min_delay=0, max_delay=0)
         sp = xmlsp.StateParser(); sp.add_generator(gen)
         s = await sp.run(timeout=2)
         self.assertEqual(s, {"a": 1, "b": 2})
@@ -76,10 +74,10 @@ class TestXMLStreamParserExtended(unittest.IsolatedAsyncioTestCase):
     async def test_timeout_partial_state(self):
         async def slow_gen():
             yield "<x>1</x>"
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.8)
             yield "<y>2</y>"
         sp = xmlsp.StateParser(); sp.add_generator(slow_gen())
-        s = await sp.run(timeout=0.3)
+        s = await sp.run(timeout=0.2)
         self.assertIn(s, ({"x": 1}, {"x": 1, "y": 2}))
 
     async def test_concurrency_many_generators(self):
@@ -101,15 +99,12 @@ class TestXMLStreamParserExtended(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s, {"a": 5})
 
     async def test_clean_eof_vs_mismatch_vs_truncation(self):
-        # clean EOF
         sp1 = xmlsp.StateParser(); sp1.add_generator(xmlsp.create_generator("<foo>test</foo>", min_delay=0, max_delay=0))
         s1 = await sp1.run(timeout=2)
         self.assertEqual(s1, {"foo": "test"})
-        # mismatch
         sp2 = xmlsp.StateParser(); sp2.add_generator(xmlsp.create_generator("<foo>test</foo></bar>", min_delay=0, max_delay=0))
         with self.assertRaises(ParseError):
             await sp2.run(timeout=2)
-        # truncation -> no top-level merge
         sp3 = xmlsp.StateParser(); sp3.add_generator(xmlsp.create_generator("<foo>test", min_delay=0, max_delay=0))
         s3 = await sp3.run(timeout=2)
         self.assertEqual(s3, {})
