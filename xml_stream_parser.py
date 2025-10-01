@@ -30,6 +30,7 @@ async def create_generator(stream_str: str,
     - If chunk_sizes provided: yields exactly those sizes in order (deterministic).
     - Else: yields random chunks of size 1..4 (stress incremental parsing).
     """
+    random.seed(42)
     idx = 0
     n = len(stream_str)
     if chunk_sizes is None:
@@ -356,15 +357,23 @@ class StateParser:
 # -----------------------
 # Demos (safe-timeout based)
 # -----------------------
+async def debug_generator(gen):
+    async for frag in gen:
+        print("GEN FRAGMENT:", repr(frag))
+
 
 async def run_basic_test():
     stream_str = "<counter>1</counter><counter>2</counter><counter>3</counter>"
+    # stream_str = "<counter>3</counter>"
     expected_state = {"counter": 3}
 
     # Realistic streaming (random 1..4 char chunks, 1..3s delays)
-    min_delay, max_delay = 1.0, 3.0
+    min_delay, max_delay = 0.1, 0.3
     generator = create_generator(stream_str, min_delay=min_delay, max_delay=max_delay)
-
+    # print generator
+    # await debug_generator(generator)
+    # generator2 = create_generator(stream_str, min_delay=min_delay, max_delay=max_delay)
+    # await debug_generator(generator2)
     # Compute a safe timeout that accounts for worst-case chunking+delays
     timeout = compute_safe_timeout_for_stream(
         stream_str, min_delay, max_delay, chunk_sizes=None, margin=2.0
@@ -406,6 +415,27 @@ async def run_multi_generator_test_deterministic():
         yield "<c><d>4.5</d></c>"
 
     expected = {"a": 10, "b": 30, "c": {"d": 4.5}}
+    sp = StateParser()
+    sp.add_generator(gen1())
+    sp.add_generator(gen2())
+    state = await sp.run(timeout=2)
+    print("Deterministic multi-gen state:", state)
+    assert state == expected, f"Expected {expected}, got {state}"
+    print("✔ Deterministic multi-generator test passed.")
+	
+
+async def run_multi_generator_test_deterministic2():
+    # Two fixed-timing generators -> deterministic last-write-wins on 'b'
+    expected_state = {"counter": 3}
+
+    # Realistic streaming (random 1..4 char chunks, 1..3s delays)
+    min_delay, max_delay = 0.01, 0.02
+    stream_str = "<foo><bar>1</bar></foo><foo><bar>2</bar></foo><foo><bar>3</bar></foo>"
+    gen1 = create_generator(stream_str, min_delay=min_delay, max_delay=max_delay)
+    stream_str2 = "<foo><bar2>1</bar2></foo><foo><bar2>2</bar2></foo>"
+    gen2 = create_generator(stream_str2, min_delay=min_delay, max_delay=max_delay)
+
+    expected = {"foo": ({"bar": 3},{"bar2": 2})}
     sp = StateParser()
     sp.add_generator(gen1())
     sp.add_generator(gen2())
