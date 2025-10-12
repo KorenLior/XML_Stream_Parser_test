@@ -260,11 +260,12 @@ class StateParser:
     - We merge an element into state only when a **top-level** element closes (depth == 1).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, verbose: bool = False) -> None:
         self._generators: list[AsyncIterator[str]] = []
         self._state: Dict[str, Any] = {}
         self._lock = asyncio.Lock()
         self._done = False
+        self._verbose = verbose
 
     def add_generator(self, gen: AsyncIterator[str]) -> None:
         if self._done:
@@ -285,6 +286,8 @@ class StateParser:
 
         # Stream in chunks
         async for chunk in gen:
+            if self._verbose:
+                print(f"[VERBOSE] Incoming chunk: {repr(chunk)}")
             chunk = strip_decl(chunk)
             if not chunk:
                 continue
@@ -307,7 +310,12 @@ class StateParser:
                     if depth == 1:
                         obj = _elem_to_obj(elem)
                         async with self._lock:
+                            if self._verbose:
+                                print(f"[VERBOSE] Merging element '{elem.tag}': {obj}")
+                                print(f"[VERBOSE] State before update: {self._state}")
                             _deep_update(self._state, {elem.tag: obj})
+                            if self._verbose:
+                                print(f"[VERBOSE] State after update: {self._state}")
                         elem.clear()
                     if depth > 0:
                         depth -= 1
@@ -327,7 +335,12 @@ class StateParser:
                     if depth == 1:
                         obj = _elem_to_obj(elem)
                         async with self._lock:
+                            if self._verbose:
+                                print(f"[VERBOSE] Merging element '{elem.tag}': {obj}")
+                                print(f"[VERBOSE] State before update: {self._state}")
                             _deep_update(self._state, {elem.tag: obj})
+                            if self._verbose:
+                                print(f"[VERBOSE] State after update: {self._state}")
                         elem.clear()
                     if depth > 0:
                         depth -= 1
@@ -376,8 +389,14 @@ async def run_basic_test():
     # await debug_generator(generator2)
     # Compute a safe timeout that accounts for worst-case chunking+delays
     timeout = compute_safe_timeout_for_stream(
-        stream_str, min_delay, max_delay, chunk_sizes=None, margin=2.0
+        stream_str,
+        min_delay,
+        max_delay,
+        chunk_sizes=None,
+        margin=2.0
     )
+    test_tab = 0
+    print("tab ok even though all file in space")
 
     sp = StateParser()
     sp.add_generator(generator)
@@ -445,10 +464,40 @@ async def run_multi_generator_test_deterministic2():
     print("✔ Deterministic multi-generator test passed.")
 
 
+async def run_verbose_test():
+    """Test the verbose mode functionality."""
+    print("\n=== Testing Verbose Mode ===")
+    stream_str = "<counter>1</counter><counter>2</counter><counter>3</counter>"
+    expected_state = {"counter": 3}
+
+    # Create generator with small delays for better visibility
+    min_delay, max_delay = 0.01, 0.02
+    generator = create_generator(stream_str, min_delay=min_delay, max_delay=max_delay)
+    
+    # Compute safe timeout
+    timeout = compute_safe_timeout_for_stream(
+        stream_str,
+        min_delay,
+        max_delay,
+        chunk_sizes=None,
+        margin=2.0
+    )
+
+    # Test with verbose mode enabled
+    sp = StateParser(verbose=True)
+    sp.add_generator(generator)
+    actual_state = await sp.run(timeout=timeout)
+    
+    print(f"\nFinal state: {actual_state}")
+    assert expected_state == actual_state, f"Expected {expected_state}, got {actual_state}"
+    print("✔ Verbose test passed.")
+
+
 async def demo():
     await run_basic_test()
     await run_nested_test()
     await run_multi_generator_test_deterministic()
+    await run_verbose_test()
 
 
 if __name__ == "__main__":
